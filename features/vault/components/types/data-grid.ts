@@ -218,6 +218,7 @@ export interface FileCellData {
   size: number;
   type: string;
   url?: string;
+  vaultFileId?: number;
 }
 
 export type TextFilterOperator =

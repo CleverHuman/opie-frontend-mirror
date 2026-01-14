@@ -17,12 +17,13 @@ import { TabsContent } from "@/components/ui/tabs";
 
 import { processDocumentFiles } from "./services/documentProcessingService";
 import { extractColumnData } from "./services/geminiService";
-import { uploadFiles, analyzeDocuments } from "@/api/vault";
+import { uploadFiles, analyzeDocuments, generateVaultArtifacts, getVaultArtifact } from "@/api/vault";
 import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/components/ui/use-toast";
 import { useParams } from "next/navigation";
 import { VerificationSidebar } from "./verification-sidebar";
 import type { DocumentFile, Column } from "../types";
+import type { VaultFile as VaultFileType } from "@/types/api";
 
 // Column type definition
 
@@ -105,6 +106,58 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
   
   const selectedRow = React.useMemo(() => data.find(r => r.id === selectedRowId), [data, selectedRowId]);
 
+  const encodeToBase64 = React.useCallback((content: string) => {
+    return btoa(unescape(encodeURIComponent(content)));
+  }, []);
+
+  const convertVaultFileToMarkdown = React.useCallback(
+    async (vaultFileId: number): Promise<string> => {
+      try {
+        await generateVaultArtifacts(vaultFileId);
+      } catch (error) {
+        console.warn("Failed to enqueue artifact generation", error);
+      }
+
+      const maxAttempts = 60;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const artifact = await getVaultArtifact(vaultFileId, "markdown");
+        if (artifact.status === "completed" && artifact.content) {
+          return artifact.content;
+        }
+
+        if (artifact.status === "failed") {
+          throw new Error(artifact.error || "Artifact generation failed");
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      }
+
+      throw new Error("Timed out waiting for document conversion");
+    },
+    [],
+  );
+
+  const processFileWithDocling = React.useCallback(
+    async (file: File, vaultFileId?: number | null): Promise<string> => {
+      if (vaultFileId) {
+        const markdown = await convertVaultFileToMarkdown(vaultFileId);
+        return encodeToBase64(markdown);
+      }
+
+      const result = await processDocumentFiles([file]);
+      if (result.success.length > 0) {
+        return result.success[0].content;
+      }
+
+      if (result.errors.length > 0) {
+        throw new Error(result.errors[0].error);
+      }
+
+      throw new Error("Failed to process document");
+    },
+    [convertVaultFileToMarkdown, encodeToBase64],
+  );
+
   // Helper function to download file from vault URL and convert to File object
   const downloadFileFromVault = React.useCallback(async (fileUrl: string, filename: string): Promise<File> => {
     try {
@@ -122,20 +175,21 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
   }, []);
 
   // Helper function to upload file to vault
-  const uploadFileToVault = React.useCallback(async (file: File): Promise<void> => {
+  const uploadFileToVault = React.useCallback(async (file: File): Promise<VaultFileType | null> => {
     if (!currentProjectId || !user) {
       console.warn('Cannot upload to vault: missing projectId or user');
-      return;
+      return null;
     }
 
     try {
-      await uploadFiles({
+      const uploaded = await uploadFiles({
         file,
         project_uuid: currentProjectId,
         uploaded_by: user.id,
         team: teamId,
         parent_id: 0, // Upload to root folder
       });
+      return uploaded as VaultFileType;
     } catch (error) {
       console.error('Failed to upload file to vault:', error);
       toast({
@@ -143,6 +197,7 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
         description: "File added to analyser but failed to upload to vault. You can manually upload it later.",
         variant: "default",
       });
+      return null;
     }
   }, [currentProjectId, user, teamId, toast]);
 
@@ -413,6 +468,7 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
           size: downloadedFile.size,
           type: downloadedFile.type,
           url: URL.createObjectURL(downloadedFile),
+          vaultFileId: file.id,
         };
 
         const newRow: RowData = {
@@ -441,29 +497,16 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
         ));
 
         try {
-          const result = await processDocumentFiles([downloadedFile]);
-          if (result.success.length > 0) {
-            const processedFile = result.success[0];
-            setData((prev) => prev.map((row) => 
-              row.id === newRow.id 
-                ? { 
-                    ...row, 
-                    processedContent: processedFile.content,
-                    processingStatus: 'completed' as ProcessingStatus,
-                  }
-                : row
-            ));
-          } else if (result.errors.length > 0) {
-            setData((prev) => prev.map((row) => 
-              row.id === newRow.id 
-                ? { 
-                    ...row, 
-                    processingStatus: 'error' as ProcessingStatus,
-                    errorMessage: result.errors[0].error,
-                  }
-                : row
-            ));
-          }
+          const processedContent = await processFileWithDocling(downloadedFile, file.id);
+          setData((prev) => prev.map((row) => 
+            row.id === newRow.id 
+              ? { 
+                  ...row, 
+                  processedContent,
+                  processingStatus: 'completed' as ProcessingStatus,
+                }
+              : row
+          ));
         } catch (error) {
           setData((prev) => prev.map((row) => 
             row.id === newRow.id 
@@ -586,9 +629,10 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
     columnId: string;
   }): Promise<FileCellData[]> => {
     // Upload files to vault first (if project context is available)
+    let uploadedVaultFiles: (VaultFileType | null)[] = [];
     if (currentProjectId && user) {
       try {
-        await Promise.all(files.map(file => uploadFileToVault(file)));
+        uploadedVaultFiles = await Promise.all(files.map(file => uploadFileToVault(file)));
       } catch (error) {
         // Continue processing even if vault upload fails
         console.warn('Some files failed to upload to vault:', error);
@@ -596,12 +640,13 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
     }
 
     // Create FileCellData objects for each file
-    const uploadedFiles: FileCellData[] = files.map((file) => ({
+    const uploadedFiles: FileCellData[] = files.map((file, idx) => ({
       id: crypto.randomUUID(),
       name: file.name,
       size: file.size,
       type: file.type,
       url: URL.createObjectURL(file),
+      vaultFileId: uploadedVaultFiles[idx]?.id,
     }));
 
     // Update the row with uploaded files and set processing status
@@ -613,29 +658,16 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
 
     // Process the files to extract markdown content
     try {
-      const result = await processDocumentFiles(files);
-      if (result.success.length > 0) {
-        const processedFile = result.success[0];
-        setData((prev) => prev.map((row, idx) => 
-          idx === rowIndex 
-            ? { 
-                ...row, 
-                processedContent: processedFile.content,
-                processingStatus: 'completed' as const,
-              }
-            : row
-        ));
-      } else if (result.errors.length > 0) {
-        setData((prev) => prev.map((row, idx) => 
-          idx === rowIndex 
-            ? { 
-                ...row, 
-                processingStatus: 'error' as const,
-                errorMessage: result.errors[0].error,
-              }
-            : row
-        ));
-      }
+      const processedContent = await processFileWithDocling(files[0], uploadedFiles[0]?.vaultFileId);
+      setData((prev) => prev.map((row, idx) => 
+        idx === rowIndex 
+          ? { 
+              ...row, 
+              processedContent,
+              processingStatus: 'completed' as const,
+            }
+          : row
+      ));
     } catch (error) {
       setData((prev) => prev.map((row, idx) => 
         idx === rowIndex 
@@ -649,7 +681,68 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
     }
 
     return uploadedFiles;
-  }, [currentProjectId, user, uploadFileToVault]);
+  }, [currentProjectId, user, uploadFileToVault, processFileWithDocling]);
+
+  const handleCellClick = React.useCallback((rowIndex: number, columnId: string) => {
+    const row = data[rowIndex];
+    setSelectedRowId(row.id);
+    setSelectedCell({ rowIndex, columnId });
+    if (columnId === 'content') {
+      setSidebarMode('document');
+    } else {
+      setSidebarMode('cell');
+    }
+  }, [data]);
+
+  const handleCellFocusChange = React.useCallback((rowIndex: number, columnId: string, focused: boolean) => {
+    if (focused) {
+      setSelectedRowId(data[rowIndex].id);
+      setSelectedCell({ rowIndex, columnId });
+    }
+  }, [data]);
+      
+  const handleAnalysisResultsUpdate = React.useCallback((newResults: AnalysisResults) => {
+    setAnalysisResults(newResults);
+  }, []);
+
+  const handleFilesDrop = React.useCallback(async (fileCells: FileCellData[], rowIndex: number, columnId: string) => {
+    setIsDraggingOver(false);
+    // Update the row immediately with the dropped files
+    setData((prev) => prev.map((row, idx) => 
+      idx === rowIndex 
+        ? { ...row, [columnId]: fileCells, processingStatus: 'processing' as const }
+        : row
+    ));
+
+    // Process the files (use first file for now)
+    if (fileCells.length > 0 && fileCells[0].url) {
+      try {
+        const response = await fetch(fileCells[0].url);
+        const blob = await response.blob();
+        const file = new File([blob], fileCells[0].name, { type: blob.type });
+        const processedContent = await processFileWithDocling(file, fileCells[0].vaultFileId);
+        setData((prev) => prev.map((row, idx) => 
+          idx === rowIndex 
+            ? { 
+                ...row, 
+                processedContent,
+                processingStatus: 'completed' as const,
+              }
+            : row
+        ));
+      } catch (error) {
+        setData((prev) => prev.map((row, idx) => 
+          idx === rowIndex 
+            ? { 
+                ...row, 
+                processingStatus: 'error' as const,
+                errorMessage: error instanceof Error ? error.message : 'Unknown error',
+              }
+            : row
+        ));
+      }
+    }
+  }, [processFileWithDocling]);
 
   // Handle file deletions within cells
   const onFilesDelete = React.useCallback(async ({ fileIds, rowIndex, columnId }: {
@@ -788,67 +881,6 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
     } as any,
   });
 
-  // Handle drag and drop
-  const handleDrop = React.useCallback(async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDraggingOver(false);
-    
-    const fileList = e.dataTransfer.files;
-    if (!fileList || fileList.length === 0) return;
-
-    const files = Array.from(fileList) as File[];
-    if (files.length === 0) return;
-
-    // Upload files to vault first (if project context is available)
-    if (currentProjectId && user) {
-      try {
-        await Promise.all(files.map(file => uploadFileToVault(file)));
-      } catch (error) {
-        // Continue processing even if vault upload fails
-        console.warn('Some files failed to upload to vault:', error);
-      }
-    }
-
-    // Clear sorting so new rows appear at the bottom
-    if (dataGridProps.table.getState().sorting.length > 0) {
-      dataGridProps.table.setSorting([]);
-    }
-
-    setIsConverting(true);
-
-    // Create initial rows with files
-    const initialRows: RowData[] = files.map((file: File) => {
-      const fileData: FileCellData = {
-        id: crypto.randomUUID(),
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        url: URL.createObjectURL(file),
-      };
-
-      return {
-        id: crypto.randomUUID(),
-        content: [fileData],
-      };
-    });
-
-    // Add rows immediately so user sees them
-    // If there's only empty rows (no content), replace them instead of appending
-    setData((prev) => {
-      const hasOnlyEmptyRows = prev.every(row => {
-        const content = row.content;
-        return !content || (Array.isArray(content) && content.length === 0);
-      });
-      if (hasOnlyEmptyRows) {
-        return initialRows;
-      }
-      return [...prev, ...initialRows];
-    });
-
-    setIsConverting(false);
-  }, [dataGridProps.table, currentProjectId, user, uploadFileToVault]);
-
   const handleDragOver = React.useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -919,14 +951,24 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
 
           setIsConverting(true);
 
+          let uploadedVaultFiles: (VaultFileType | null)[] = [];
+          if (currentProjectId && user) {
+            try {
+              uploadedVaultFiles = await Promise.all(files.map(file => uploadFileToVault(file)));
+            } catch (error) {
+              console.warn('Some files failed to upload to vault:', error);
+            }
+          }
+
           // Create initial rows with pending status
-          const initialRows: RowData[] = files.map((file: File) => {
+          const initialRows: RowData[] = files.map((file: File, idx: number) => {
             const fileData: FileCellData = {
               id: crypto.randomUUID(),
               name: file.name,
               size: file.size,
               type: file.type,
               url: URL.createObjectURL(file),
+              vaultFileId: uploadedVaultFiles[idx]?.id,
             };
 
             return {
@@ -950,20 +992,11 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
             return [...prev, ...initialRows];
           });
 
-          // Upload files to vault first (if project context is available)
-          if (currentProjectId && user) {
-            try {
-              await Promise.all(files.map(file => uploadFileToVault(file)));
-            } catch (error) {
-              // Continue processing even if vault upload fails
-              console.warn('Some files failed to upload to vault:', error);
-            }
-          }
-
           // Process each file individually for real-time updates
           for (let i = 0; i < files.length; i++) {
             const file = files[i];
             const rowId = initialRows[i].id;
+            const vaultFileId = uploadedVaultFiles[i]?.id;
 
             // Update status to processing
             setData((prev) => prev.map((row) => 
@@ -973,33 +1006,16 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
             ));
 
             try {
-              // Process single file
-              const result = await processDocumentFiles([file]);
-
-              if (result.success.length > 0) {
-                const processedFile = result.success[0];
-                // Update row with processed content
-                setData((prev) => prev.map((row) => 
-                  row.id === rowId 
-                    ? { 
-                        ...row, 
-                        processedContent: processedFile.content,
-                        processingStatus: 'completed' as ProcessingStatus,
-                      }
-                    : row
-                ));
-              } else if (result.errors.length > 0) {
-                // Update row with error status
-                setData((prev) => prev.map((row) => 
-                  row.id === rowId 
-                    ? { 
-                        ...row, 
-                        processingStatus: 'error' as ProcessingStatus,
-                        errorMessage: result.errors[0].error,
-                      }
-                    : row
-                ));
-              }
+              const processedContent = await processFileWithDocling(file, vaultFileId);
+              setData((prev) => prev.map((row) => 
+                row.id === rowId 
+                  ? { 
+                      ...row, 
+                      processedContent: processedContent,
+                      processingStatus: 'completed' as ProcessingStatus,
+                    }
+                  : row
+              ));
             } catch (error) {
               // Update row with error status
               setData((prev) => prev.map((row) => 

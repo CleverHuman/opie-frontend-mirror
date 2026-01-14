@@ -21,6 +21,25 @@ export interface VaultFilesResponse {
   previous: string | null;
 }
 
+export type ArtifactType = 'markdown' | 'text' | 'docling_json';
+
+export interface GenerateArtifactsResponse {
+  vault_file_id: number;
+  status: string;
+  task_id?: string;
+  artifact_paths?: Record<string, string | null>;
+  error?: string;
+}
+
+export interface ArtifactResponse {
+  vault_file_id: number;
+  artifact_type: ArtifactType;
+  status: string;
+  path?: string | null;
+  content?: string;
+  error?: string | null;
+}
+
 export async function getVaultFilesByProject(
   projectId: string,
   page: number = 1,
@@ -235,6 +254,34 @@ export async function moveVaultFiles(fileIds: number[], targetFolderId: number):
   } catch (error) {
     const { message } = handleApiError(error);
     throw new Error(message || 'Failed to move files');
+  }
+}
+
+export async function generateVaultArtifacts(vaultFileId: number): Promise<GenerateArtifactsResponse> {
+  try {
+    const response = await api.post(`/opie/api/v1/vault-files/${vaultFileId}/generate-artifacts/`, {});
+    return response as GenerateArtifactsResponse;
+  } catch (error) {
+    const { message } = handleApiError(error);
+    throw new Error(message || 'Failed to start artifact generation');
+  }
+}
+
+export async function getVaultArtifact(
+  vaultFileId: number,
+  artifactType: ArtifactType = 'markdown',
+  includeContent: boolean = true,
+): Promise<ArtifactResponse> {
+  try {
+    const params = new URLSearchParams({
+      type: artifactType,
+      include_content: includeContent ? 'true' : 'false',
+    });
+    const response = await api.get(`/opie/api/v1/vault-files/${vaultFileId}/artifacts/?${params.toString()}`);
+    return response as ArtifactResponse;
+  } catch (error) {
+    const { message } = handleApiError(error);
+    throw new Error(message || 'Failed to fetch artifact');
   }
 }
 
