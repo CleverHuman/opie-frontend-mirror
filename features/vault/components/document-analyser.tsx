@@ -17,7 +17,7 @@ import { TabsContent } from "@/components/ui/tabs";
 
 import { processDocumentFiles } from "./services/documentProcessingService";
 import { extractColumnData } from "./services/geminiService";
-import { uploadFiles, analyzeDocuments, generateVaultArtifacts, getVaultArtifact } from "@/api/vault";
+import { uploadFiles, analyzeDocuments, getVaultArtifact } from "@/api/vault";
 import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/components/ui/use-toast";
 import { useParams } from "next/navigation";
@@ -112,15 +112,13 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
 
   const convertVaultFileToMarkdown = React.useCallback(
     async (vaultFileId: number): Promise<string> => {
-      try {
-        await generateVaultArtifacts(vaultFileId);
-      } catch (error) {
-        console.warn("Failed to enqueue artifact generation", error);
-      }
-
+      // Backend auto-triggers artifact generation on upload, so we just poll for completion
       const maxAttempts = 60;
+      const pollIntervalMs = 2000;
+
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         const artifact = await getVaultArtifact(vaultFileId, "markdown");
+
         if (artifact.status === "completed" && artifact.content) {
           return artifact.content;
         }
@@ -129,7 +127,7 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
           throw new Error(artifact.error || "Artifact generation failed");
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       }
 
       throw new Error("Timed out waiting for document conversion");

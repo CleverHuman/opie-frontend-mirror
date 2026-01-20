@@ -35,7 +35,6 @@ export interface ArtifactResponse {
   vault_file_id: number;
   artifact_type: ArtifactType;
   status: string;
-  path?: string | null;
   content?: string;
   error?: string | null;
 }
