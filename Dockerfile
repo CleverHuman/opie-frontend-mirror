@@ -1,5 +1,5 @@
 # ---- Build Stage ----
-FROM node:24.11.0-alpine AS builder
+FROM node:24.13.0-alpine AS builder
 
 # Set working directory
 WORKDIR /app
@@ -43,7 +43,7 @@ ENV NEXT_ON_PAGES=0
 RUN if [ -f pnpm-lock.yaml ]; then pnpm run build; else npm run build; fi
 
 # ---- Production Stage ----
-FROM node:24.11.0-alpine AS runner
+FROM node:24.13.0-alpine AS runner
 
 # Build arguments for Next.js public environment variables
 ARG NEXT_PUBLIC_DEFAULT_AGENT_ID
