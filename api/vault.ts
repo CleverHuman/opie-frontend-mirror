@@ -256,9 +256,9 @@ export async function moveVaultFiles(fileIds: number[], targetFolderId: number):
   }
 }
 
-export async function generateVaultArtifacts(vaultFileId: number): Promise<GenerateArtifactsResponse> {
+export async function generateVaultArtifacts(vaultFileUuid: string): Promise<GenerateArtifactsResponse> {
   try {
-    const response = await api.post(`/opie/api/v1/vault-files/${vaultFileId}/generate-artifacts/`, {});
+    const response = await api.post(`/opie/api/v1/vault-files/${vaultFileUuid}/generate-artifacts/`, {});
     return response as GenerateArtifactsResponse;
   } catch (error) {
     const { message } = handleApiError(error);

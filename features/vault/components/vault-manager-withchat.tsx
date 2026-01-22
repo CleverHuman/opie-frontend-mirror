@@ -5,13 +5,13 @@ import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProject } from "@/api/projects";
-import { uploadFiles, getVaultFilesByProject, deleteVaultFile, VaultFilesResponse } from "@/api/vault";
+import { uploadFiles, getVaultFilesByProject, deleteVaultFile, VaultFilesResponse, generateVaultArtifacts } from "@/api/vault";
 import { Project, VaultFile as BaseVaultFile } from "@/types/api";
 import { handleApiError } from "@/lib/utils/handle-api-error";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/contexts/auth-context";
 import { Loader2, Settings, Activity, ArrowLeft, Edit, Settings2 } from "lucide-react";
-import { Plus, FileText, Filter, ChevronDown, Eye, Download, Link, Trash2, MoreHorizontal, UploadCloud } from "lucide-react";
+import { Plus, FileText, Filter, ChevronDown, Eye, Download, Link, Trash2, MoreHorizontal, UploadCloud, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import SearchInput from "@/components/ui/search-input";
 import { formatDistanceToNow } from "date-fns";
@@ -343,6 +343,37 @@ export function VaultManager() {
       });
     }
   }, [toast]);
+
+  const handleGenerateArtifacts = useCallback(
+    async (file: VaultFile) => {
+      if (!file.uuid) {
+        toast({
+          title: "Error",
+          description: "File UUID not available.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      try {
+        const response = await generateVaultArtifacts(file.uuid);
+        
+        toast({
+          title: "Artifact generation started",
+          description: response.status === "processing" 
+            ? "Artifacts are being generated. This may take a few moments."
+            : `File status: ${response.status}`,
+        });
+      } catch (error: any) {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to start artifact generation. Please try again.",
+          variant: "destructive",
+        });
+      }
+    },
+    [toast]
+  );
   
   const handleBulkDelete = useCallback(async () => {
     if (selectedFiles.length === 0) return;
@@ -735,6 +766,12 @@ export function VaultManager() {
                                     <Eye className="mr-2 h-4 w-4" />
                                     Preview
                                   </DropdownMenuItem>
+                                  {!file.is_folder && (
+                                    <DropdownMenuItem onClick={() => handleGenerateArtifacts(file)}>
+                                      <RefreshCw className="mr-2 h-4 w-4" />
+                                      Generate Artifacts
+                                    </DropdownMenuItem>
+                                  )}
                                   <DropdownMenuItem onClick={() => handleFileDownload(file)}>
                                     <Download className="mr-2 h-4 w-4" />
                                     Download

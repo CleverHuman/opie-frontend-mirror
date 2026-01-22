@@ -20,6 +20,7 @@ import {
   Trash2,
   RotateCcw,
   Zap,
+  RefreshCw,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +44,7 @@ import {
 import { useToast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
 import { isSafeUrl } from "@/lib/utils/url";
+import { generateVaultArtifacts } from "@/api/vault";
 
 import { VaultFile } from "../types/vault";
 
@@ -196,6 +198,37 @@ export function FileTable({
         toast({
           title: "Error",
           description: "Unable to copy link. Please try again.",
+          variant: "destructive",
+        });
+      }
+    },
+    [toast]
+  );
+
+  const handleGenerateArtifacts = useCallback(
+    async (file: VaultFile) => {
+      if (!file.uuid) {
+        toast({
+          title: "Error",
+          description: "File UUID not available.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      try {
+        const response = await generateVaultArtifacts(file.uuid);
+        
+        toast({
+          title: "Artifact generation started",
+          description: response.status === "processing" 
+            ? "Artifacts are being generated. This may take a few moments."
+            : `File status: ${response.status}`,
+        });
+      } catch (error: any) {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to start artifact generation. Please try again.",
           variant: "destructive",
         });
       }
@@ -379,6 +412,12 @@ export function FileTable({
                           Analyse
                         </DropdownMenuItem>
                       )}
+                      {!file.is_folder && (
+                        <DropdownMenuItem onClick={() => handleGenerateArtifacts(file)}>
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          Generate Artifacts
+                        </DropdownMenuItem>
+                      )}
                       {onReIngest && (
                         <DropdownMenuItem onClick={() => onReIngest(file)}>
                           <FileText className="mr-2 h-4 w-4" />
@@ -415,6 +454,7 @@ export function FileTable({
     ],
     [
       handleCopyLink,
+      handleGenerateArtifacts,
       isTrashMode,
       onFileDelete,
       onFileDownload,
