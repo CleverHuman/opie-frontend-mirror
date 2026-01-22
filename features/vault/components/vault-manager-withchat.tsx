@@ -269,32 +269,56 @@ export function VaultManager() {
     setCurrentPage(1);
   }, []);
 
-  const handleFilePreview = useCallback((file: VaultFile) => {
-    // Open file in new tab for preview
-    if (file.file && isSafeUrl(file.file)) {
-      window.open(file.file, '_blank');
-    } else {
+  const handleFilePreview = useCallback(async (file: VaultFile) => {
+    if (!file.uuid) {
       toast({
         title: "Error",
-        description: "Invalid or unsafe file URL.",
+        description: "File UUID not available.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const { getVaultFileDownloadUrl } = await import('@/api/vault');
+      // Fetch signed URL for viewing (15 min expiry, inline disposition)
+      const response = await getVaultFileDownloadUrl(file.uuid, 15, 'inline');
+      window.open(response.url, '_blank');
+    } catch (error) {
+      console.error('Failed to preview file:', error);
+      toast({
+        title: "Error",
+        description: "Failed to preview file. Please try again.",
         variant: "destructive",
       });
     }
   }, [toast]);
 
-  const handleFileDownload = useCallback((file: VaultFile) => {
-    // Direct download through URL
-    if (file.file && isSafeUrl(file.file)) {
+  const handleFileDownload = useCallback(async (file: VaultFile) => {
+    if (!file.uuid) {
+      toast({
+        title: "Error",
+        description: "File UUID not available.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const { getVaultFileDownloadUrl } = await import('@/api/vault');
+      // Fetch signed URL for download (30 min expiry, attachment disposition)
+      const response = await getVaultFileDownloadUrl(file.uuid, 30, 'attachment');
       const a = document.createElement('a');
-      a.href = file.file;
-      a.download = file.original_filename || 'download';
+      a.href = response.url;
+      a.download = file.original_filename || response.filename || 'download';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-    } else {
+    } catch (error) {
+      console.error('Failed to download file:', error);
       toast({
         title: "Error",
-        description: "Invalid or unsafe file URL.",
+        description: "Failed to download file. Please try again.",
         variant: "destructive",
       });
     }

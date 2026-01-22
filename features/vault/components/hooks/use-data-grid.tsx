@@ -2400,7 +2400,11 @@ function useDataGrid<TData>({
 
   useIsomorphicLayoutEffect(() => {
     const rafId = requestAnimationFrame(() => {
-      rowVirtualizer.measure();
+      // Only measure if scroll element is available and visible
+      const scrollElement = dataGridRef.current;
+      if (scrollElement && scrollElement.offsetParent !== null) {
+        rowVirtualizer.measure();
+      }
     });
     return () => cancelAnimationFrame(rafId);
   }, [

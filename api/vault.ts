@@ -136,18 +136,18 @@ export async function deleteVaultFile(fileId: number): Promise<void> {
   }
 }
 
-export async function permanentDeleteVaultFile(fileId: number): Promise<void> {
+export async function permanentDeleteVaultFile(uuid: string): Promise<void> {
   try {
-    await api.delete(`/opie/api/v1/vault-files/${fileId}/permanent-delete/`);
+    await api.delete(`/opie/api/v1/vault-files/${uuid}/permanent-delete/`);
   } catch (error) {
     const { message } = handleApiError(error);
     throw new Error(message || 'Failed to permanently delete file');
   }
 }
 
-export async function restoreVaultFile(fileId: number): Promise<void> {
+export async function restoreVaultFile(uuid: string): Promise<void> {
   try {
-    await api.post(`/opie/api/v1/vault-files/${fileId}/restore/`);
+    await api.post(`/opie/api/v1/vault-files/${uuid}/restore/`);
   } catch (error) {
     const { message } = handleApiError(error);
     throw new Error(message || 'Failed to restore file');
@@ -267,7 +267,7 @@ export async function generateVaultArtifacts(vaultFileId: number): Promise<Gener
 }
 
 export async function getVaultArtifact(
-  vaultFileId: number,
+  vaultFileUuid: string,
   artifactType: ArtifactType = 'markdown',
   includeContent: boolean = true,
 ): Promise<ArtifactResponse> {
@@ -276,11 +276,50 @@ export async function getVaultArtifact(
       type: artifactType,
       include_content: includeContent ? 'true' : 'false',
     });
-    const response = await api.get(`/opie/api/v1/vault-files/${vaultFileId}/artifacts/?${params.toString()}`);
+    const response = await api.get(`/opie/api/v1/vault-files/${vaultFileUuid}/artifacts/?${params.toString()}`);
     return response as ArtifactResponse;
   } catch (error) {
     const { message } = handleApiError(error);
     throw new Error(message || 'Failed to fetch artifact');
+  }
+}
+
+export interface VaultFileDownloadResponse {
+  url: string;
+  filename: string;
+  content_type: string;
+  size: number;
+  expires_in_seconds: number;
+}
+
+/**
+ * Get the proxied content URL for a vault file (for secure preview).
+ * This URL goes through our Next.js API route, keeping signed URLs server-side.
+ */
+export function getVaultFileContentUrl(vaultFileUuid: string): string {
+  return `/api/vault/files/${vaultFileUuid}/content`;
+}
+
+export async function getVaultFileDownloadUrl(
+  vaultFileUuid: string,
+  expires?: number,
+  disposition?: 'inline' | 'attachment'
+): Promise<VaultFileDownloadResponse> {
+  try {
+    const params = new URLSearchParams();
+    if (expires !== undefined) {
+      params.append('expires', expires.toString());
+    }
+    if (disposition) {
+      params.append('disposition', disposition);
+    }
+    const queryString = params.toString();
+    const url = `/opie/api/v1/vault-files/${vaultFileUuid}/download/${queryString ? `?${queryString}` : ''}`;
+    const response = await api.get(url);
+    return response as VaultFileDownloadResponse;
+  } catch (error) {
+    const { message } = handleApiError(error);
+    throw new Error(message || 'Failed to get download URL');
   }
 }
 
@@ -359,5 +398,104 @@ export async function analyzeDocuments(
   } catch (error) {
     const { message } = handleApiError(error);
     throw new Error(message || 'Failed to analyze documents');
+  }
+}
+
+// Preset types and API
+export interface PresetColumn {
+  name: string;
+  type: string;
+  prompt: string;
+}
+
+export interface AnalyserPreset {
+  id: number;
+  name: string;
+  description?: string;
+  columns: PresetColumn[];
+  is_system: boolean;
+  created_by?: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AnalyserPresetsResponse {
+  results: AnalyserPreset[];
+  count: number;
+  next: string | null;
+  previous: string | null;
+}
+
+/**
+ * Get all analyser presets (system + user's own)
+ */
+export async function getAnalyserPresets(): Promise<AnalyserPreset[]> {
+  try {
+    const response = await api.get('/opie/api/v1/analyser-presets/');
+    // Handle paginated response
+    if (response.results) {
+      return response.results;
+    }
+    return Array.isArray(response) ? response : [];
+  } catch (error) {
+    const { message } = handleApiError(error);
+    throw new Error(message || 'Failed to fetch analyser presets');
+  }
+}
+
+/**
+ * Get a single analyser preset by ID
+ */
+export async function getAnalyserPreset(id: number): Promise<AnalyserPreset> {
+  try {
+    const response = await api.get(`/opie/api/v1/analyser-presets/${id}/`);
+    return response as AnalyserPreset;
+  } catch (error) {
+    const { message } = handleApiError(error);
+    throw new Error(message || 'Failed to fetch analyser preset');
+  }
+}
+
+/**
+ * Create a new analyser preset
+ */
+export async function createAnalyserPreset(
+  preset: Omit<AnalyserPreset, 'id' | 'created_at' | 'updated_at' | 'is_system' | 'created_by'>
+): Promise<AnalyserPreset> {
+  try {
+    const response = await api.post('/opie/api/v1/analyser-presets/', preset);
+    return response as AnalyserPreset;
+  } catch (error) {
+    const { message } = handleApiError(error);
+    throw new Error(message || 'Failed to create analyser preset');
+  }
+}
+
+/**
+ * Update an analyser preset
+ */
+export async function updateAnalyserPreset(
+  id: number,
+  preset: Partial<Omit<AnalyserPreset, 'id' | 'created_at' | 'updated_at' | 'is_system' | 'created_by'>>
+): Promise<AnalyserPreset> {
+  try {
+    const response = await api.patch(`/opie/api/v1/analyser-presets/${id}/`, preset);
+    return response as AnalyserPreset;
+  } catch (error) {
+    const { message } = handleApiError(error);
+    throw new Error(message || 'Failed to update analyser preset');
+  }
+}
+
+/**
+ * Delete an analyser preset
+ */
+export async function deleteAnalyserPreset(id: number): Promise<void> {
+  try {
+    await api.delete(`/opie/api/v1/analyser-presets/${id}/`);
+  } catch (error) {
+    const { message } = handleApiError(error);
+    throw new Error(message || 'Failed to delete analyser preset');
   }
 }

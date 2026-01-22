@@ -170,10 +170,10 @@ export function FileTable({
 
   const handleCopyLink = useCallback(
     async (file: VaultFile) => {
-      if (!file.file || !isSafeUrl(file.file)) {
+      if (!file.uuid) {
         toast({
           title: "Error",
-          description: "Invalid or unsafe file URL.",
+          description: "File UUID not available.",
           variant: "destructive",
         });
         return;
@@ -184,7 +184,10 @@ export function FileTable({
           throw new Error("Clipboard API unavailable");
         }
 
-        await navigator.clipboard.writeText(file.file);
+        // Fetch signed URL to copy
+        const { getVaultFileDownloadUrl } = await import('@/api/vault');
+        const response = await getVaultFileDownloadUrl(file.uuid, 15, 'inline');
+        await navigator.clipboard.writeText(response.url);
         toast({
           title: "Link copied",
           description: "File link has been copied to your clipboard.",

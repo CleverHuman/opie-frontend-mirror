@@ -380,18 +380,35 @@ export const FilesTab = React.forwardRef<{
     refreshFiles();
   }, []);
 
-  const handleFileDownload = (file: VaultFile) => {
-    if (file.file && isSafeUrl(file.file)) {
-      const a = document.createElement('a'); a.href = file.file; a.download = file.original_filename || 'download'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    } else { toast({ title: "Error", description: "Invalid or unsafe file URL.", variant: "destructive" }); }
+  const handleFileDownload = async (file: VaultFile) => {
+    if (!file.uuid) {
+      toast({ title: "Error", description: "File UUID not available.", variant: "destructive" });
+      return;
+    }
+
+    try {
+      const { getVaultFileDownloadUrl } = await import('@/api/vault');
+      // Fetch signed URL for download (30 min expiry, attachment disposition)
+      const response = await getVaultFileDownloadUrl(file.uuid, 30, 'attachment');
+      const a = document.createElement('a');
+      a.href = response.url;
+      a.download = file.original_filename || response.filename || 'download';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Failed to download file:', error);
+      toast({ title: "Error", description: "Failed to download file. Please try again.", variant: "destructive" });
+    }
   };
 
   const handleFilePreview = (file: VaultFile) => {
-    if (file.file && isSafeUrl(file.file)) {
+    // FilePreviewDialog will fetch the signed URL internally, so we just need to check UUID exists
+    if (file.uuid) {
       setPreviewFile(file);
       setIsPreviewOpen(true);
     } else {
-      toast({ title: "Error", description: "Invalid or unsafe file URL.", variant: "destructive" });
+      toast({ title: "Error", description: "File UUID not available.", variant: "destructive" });
     }
   };
 
@@ -431,7 +448,13 @@ export const FilesTab = React.forwardRef<{
     // This will be handled by the parent component (vault-manager) via a callback
     // For now, we'll emit a custom event that the parent can listen to
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('vault-file-analyse', { detail: { file, projectId } }));
+      window.dispatchEvent(new CustomEvent('vault-file-analyse', { 
+        detail: { 
+          file, 
+          fileUuid: file.uuid,
+          projectId 
+        } 
+      }));
     }
   }, [projectId]);
 
@@ -455,7 +478,13 @@ export const FilesTab = React.forwardRef<{
     // Send each file to analyser
     for (const file of filesToAnalyse) {
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('vault-file-analyse', { detail: { file, projectId } }));
+        window.dispatchEvent(new CustomEvent('vault-file-analyse', { 
+          detail: { 
+            file, 
+            fileUuid: file.uuid,
+            projectId 
+          } 
+        }));
       }
     }
 

@@ -146,10 +146,30 @@ export default function ProjectView({ projectId }: { projectId: number }) {
   }
   
   // Handler for file preview
-  const handlePreviewFile = (file: VaultFile) => {
+  const handlePreviewFile = async (file: VaultFile) => {
+    if (!file.uuid) {
+      toast({
+        title: "Error",
+        description: "File UUID not available.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setFileToPreview(file);
-    // You would typically open a modal here to show the file preview
-    window.open(file.file, '_blank');
+    try {
+      const { getVaultFileDownloadUrl } = await import('@/api/vault');
+      // Fetch signed URL for viewing (15 min expiry, inline disposition)
+      const response = await getVaultFileDownloadUrl(file.uuid, 15, 'inline');
+      window.open(response.url, '_blank');
+    } catch (error) {
+      console.error('Failed to preview file:', error);
+      toast({
+        title: "Error",
+        description: "Failed to preview file. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
   
   // Handler for linking file to KB
@@ -369,15 +389,40 @@ export default function ProjectView({ projectId }: { projectId: number }) {
                                 <Eye className="h-4 w-4 mr-2" />
                                 Preview
                               </DropdownMenuItem>
-                              <DropdownMenuItem asChild>
-                                <a
-                                  href={file.file}
-                                  download={file.filename}
-                                  className="flex items-center w-full cursor-pointer"
-                                >
-                                  <Download className="h-4 w-4 mr-2" />
-                                  Download
-                                </a>
+                              <DropdownMenuItem
+                                onClick={async () => {
+                                  if (!file.uuid) {
+                                    toast({
+                                      title: "Error",
+                                      description: "File UUID not available.",
+                                      variant: "destructive",
+                                    });
+                                    return;
+                                  }
+
+                                  try {
+                                    const { getVaultFileDownloadUrl } = await import('@/api/vault');
+                                    // Fetch signed URL for download (30 min expiry, attachment disposition)
+                                    const response = await getVaultFileDownloadUrl(file.uuid, 30, 'attachment');
+                                    const a = document.createElement('a');
+                                    a.href = response.url;
+                                    a.download = file.original_filename || response.filename || file.filename || 'download';
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    document.body.removeChild(a);
+                                  } catch (error) {
+                                    console.error('Failed to download file:', error);
+                                    toast({
+                                      title: "Error",
+                                      description: "Failed to download file. Please try again.",
+                                      variant: "destructive",
+                                    });
+                                  }
+                                }}
+                                className="flex items-center w-full cursor-pointer"
+                              >
+                                <Download className="h-4 w-4 mr-2" />
+                                Download
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() => handleOpenLinkModal(file.id)}

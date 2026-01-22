@@ -126,7 +126,17 @@ export const TrashTab = React.forwardRef<{
     try {
       let successCount = 0; let errorCount = 0;
       for (const fileId of selectedFiles) {
-        try { await permanentDeleteVaultFile(fileId); successCount++; } catch (e) { errorCount++; }
+        // Use allFiles instead of filteredFiles to ensure we can find the file even if it's filtered out
+        const file = allFiles?.find(f => f.id === fileId);
+        if (!file || !file.uuid) {
+          console.error('File not found or missing UUID in bulk delete:', { fileId, file });
+          errorCount++;
+          continue;
+        }
+        try { await permanentDeleteVaultFile(file.uuid); successCount++; } catch (e) { 
+          console.error('Bulk delete error for file:', fileId, e);
+          errorCount++; 
+        }
       }
       if (successCount > 0) toast({ title: "Success", description: `${successCount} file${successCount !== 1 ? 's' : ''} permanently deleted` });
       if (errorCount > 0) toast({ title: "Error", description: `Failed to delete ${errorCount} file${errorCount !== 1 ? 's' : ''}`, variant: "destructive" });
@@ -136,7 +146,7 @@ export const TrashTab = React.forwardRef<{
     } finally {
       setIsDeleting(false);
     }
-  }, [selectedFiles, refreshFiles, toast, onFilesTabRefresh]);
+  }, [selectedFiles, allFiles, refreshFiles, toast, onFilesTabRefresh]);
 
   const handleDragStart = useCallback((e: React.DragEvent, fileId: number) => {
     e.stopPropagation();
@@ -165,42 +175,86 @@ export const TrashTab = React.forwardRef<{
     setDraggedFiles([]);
   }, [toast]);
 
-  const handleFileDownload = (file: VaultFile) => {
-    if (file.file && isSafeUrl(file.file)) {
-      const a = document.createElement('a'); a.href = file.file; a.download = file.original_filename || 'download'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    } else { toast({ title: "Error", description: "Invalid or unsafe file URL.", variant: "destructive" }); }
+  const handleFileDownload = async (file: VaultFile) => {
+    if (!file.uuid) {
+      toast({ title: "Error", description: "File UUID not available.", variant: "destructive" });
+      return;
+    }
+
+    try {
+      const { getVaultFileDownloadUrl } = await import('@/api/vault');
+      // Fetch signed URL for download (30 min expiry, attachment disposition)
+      const response = await getVaultFileDownloadUrl(file.uuid, 30, 'attachment');
+      const a = document.createElement('a');
+      a.href = response.url;
+      a.download = file.original_filename || response.filename || 'download';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Failed to download file:', error);
+      toast({ title: "Error", description: "Failed to download file. Please try again.", variant: "destructive" });
+    }
   };
 
-  const handleFilePreview = (file: VaultFile) => {
-    if (file.file && isSafeUrl(file.file)) { window.open(file.file, '_blank'); }
-    else { toast({ title: "Error", description: "Invalid or unsafe file URL.", variant: "destructive" }); }
+  const handleFilePreview = async (file: VaultFile) => {
+    if (!file.uuid) {
+      toast({ title: "Error", description: "File UUID not available.", variant: "destructive" });
+      return;
+    }
+
+    try {
+      const { getVaultFileDownloadUrl } = await import('@/api/vault');
+      // Fetch signed URL for viewing (15 min expiry, inline disposition)
+      const response = await getVaultFileDownloadUrl(file.uuid, 15, 'inline');
+      window.open(response.url, '_blank');
+    } catch (error) {
+      console.error('Failed to preview file:', error);
+      toast({ title: "Error", description: "Failed to preview file. Please try again.", variant: "destructive" });
+    }
   };
 
   const handleFileDelete = useCallback(async (fileId: number) => {
+    // Use allFiles instead of filteredFiles to ensure we can find the file even if it's filtered out
+    const file = allFiles?.find(f => f.id === fileId);
+    if (!file || !file.uuid) {
+      console.error('File not found or missing UUID:', { fileId, file, allFilesLength: allFiles?.length });
+      toast({ title: "Error", description: "File UUID not found", variant: "destructive" });
+      return;
+    }
     try { 
-      await permanentDeleteVaultFile(fileId); 
+      await permanentDeleteVaultFile(file.uuid); 
       toast({ title: "Success", description: "File permanently deleted" }); 
       refreshFiles(); 
       onFilesTabRefresh?.();
       setSelectedFiles([]); 
     }
     catch (error) { 
+      console.error('Delete error:', error);
       toast({ title: "Error", description: "Failed to delete file", variant: "destructive" }); 
     }
-  }, [refreshFiles, toast, onFilesTabRefresh]);
+  }, [allFiles, refreshFiles, toast, onFilesTabRefresh]);
 
   const handleFileRestore = useCallback(async (fileId: number) => {
+    // Use allFiles instead of filteredFiles to ensure we can find the file even if it's filtered out
+    const file = allFiles?.find(f => f.id === fileId);
+    if (!file || !file.uuid) {
+      console.error('File not found or missing UUID:', { fileId, file, allFilesLength: allFiles?.length });
+      toast({ title: "Error", description: "File UUID not found", variant: "destructive" });
+      return;
+    }
     try { 
-      await restoreVaultFile(fileId); 
+      await restoreVaultFile(file.uuid); 
       toast({ title: "Success", description: "File restored successfully" }); 
       refreshFiles(); 
       onFilesTabRefresh?.();
       setSelectedFiles([]); 
     }
     catch (error) { 
+      console.error('Restore error:', error);
       toast({ title: "Error", description: "Failed to restore file", variant: "destructive" }); 
     }
-  }, [refreshFiles, toast, onFilesTabRefresh]);
+  }, [allFiles, refreshFiles, toast, onFilesTabRefresh]);
 
   const handleFolderClick = useCallback((folder: VaultFile) => {
     // Trash files don't support folder navigation

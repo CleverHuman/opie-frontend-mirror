@@ -22,8 +22,9 @@ import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/components/ui/use-toast";
 import { useParams } from "next/navigation";
 import { VerificationSidebar } from "./verification-sidebar";
-import type { DocumentFile, Column } from "../types";
+import type { DocumentFile, Column, AnalyserPreset } from "../types";
 import type { VaultFile as VaultFileType } from "@/types/api";
+import { PresetSelector } from "./preset-selector";
 
 // Column type definition
 
@@ -111,13 +112,13 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
   }, []);
 
   const convertVaultFileToMarkdown = React.useCallback(
-    async (vaultFileId: number): Promise<string> => {
+    async (vaultFileUuid: string): Promise<string> => {
       // Backend auto-triggers artifact generation on upload, so we just poll for completion
       const maxAttempts = 60;
       const pollIntervalMs = 2000;
 
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        const artifact = await getVaultArtifact(vaultFileId, "markdown");
+        const artifact = await getVaultArtifact(vaultFileUuid, "markdown");
 
         if (artifact.status === "completed" && artifact.content) {
           return artifact.content;
@@ -136,10 +137,14 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
   );
 
   const processFileWithDocling = React.useCallback(
-    async (file: File, vaultFileId?: number | null): Promise<string> => {
-      if (vaultFileId) {
-        const markdown = await convertVaultFileToMarkdown(vaultFileId);
+    async (file: File | null, vaultFileUuid?: string | null): Promise<string> => {
+      if (vaultFileUuid) {
+        const markdown = await convertVaultFileToMarkdown(vaultFileUuid);
         return encodeToBase64(markdown);
+      }
+
+      if (!file) {
+        throw new Error("No file or vault file UUID provided");
       }
 
       const result = await processDocumentFiles([file]);
@@ -156,21 +161,6 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
     [convertVaultFileToMarkdown, encodeToBase64],
   );
 
-  // Helper function to download file from vault URL and convert to File object
-  const downloadFileFromVault = React.useCallback(async (fileUrl: string, filename: string): Promise<File> => {
-    try {
-      const response = await fetch(fileUrl, {
-        credentials: 'include',
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to download file: ${response.statusText}`);
-      }
-      const blob = await response.blob();
-      return new File([blob], filename, { type: blob.type });
-    } catch (error) {
-      throw new Error(`Error downloading file from vault: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }, []);
 
   // Helper function to upload file to vault
   const uploadFileToVault = React.useCallback(async (file: File): Promise<VaultFileType | null> => {
@@ -441,12 +431,15 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
     };
   }, [runAnalysis]);
 
+  // Ref to store rowVirtualizer so it can be accessed in event handler
+  const rowVirtualizerRef = React.useRef<any>(null);
+
   // Listen for files sent from vault
   React.useEffect(() => {
-    const handleVaultFileAnalyse = async (event: CustomEvent<{ file: any; projectId: string }>) => {
-      const { file } = event.detail;
+    const handleVaultFileAnalyse = async (event: CustomEvent<{ file: any; fileUuid?: string; projectId: string }>) => {
+      const { file, fileUuid } = event.detail;
       
-      if (!file || !file.file) {
+      if (!file || !file.id) {
         toast({
           title: "Error",
           description: "Invalid file data",
@@ -456,17 +449,14 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
       }
 
       try {
-        // Download the file from vault
-        const downloadedFile = await downloadFileFromVault(file.file, file.original_filename || file.filename || 'document');
-        
-        // Add to analyser
+        // Add to analyser using file ID/UUID - no need to download the file
         const fileData: FileCellData = {
           id: crypto.randomUUID(),
-          name: downloadedFile.name,
-          size: downloadedFile.size,
-          type: downloadedFile.type,
-          url: URL.createObjectURL(downloadedFile),
+          name: file.original_filename || file.filename || 'document',
+          size: file.size || 0,
+          type: file.type || 'application/octet-stream',
           vaultFileId: file.id,
+          vaultFileUuid: fileUuid || file.uuid,
         };
 
         const newRow: RowData = {
@@ -486,7 +476,8 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
           return [...prev, newRow];
         });
 
-        // Process the file
+
+        // Process the file using the vault file ID to get markdown artifact
         setIsConverting(true);
         setData((prev) => prev.map((row) => 
           row.id === newRow.id 
@@ -495,7 +486,8 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
         ));
 
         try {
-          const processedContent = await processFileWithDocling(downloadedFile, file.id);
+          // Pass null for File parameter since we're using vaultFileUuid to get artifact directly
+          const processedContent = await processFileWithDocling(null, fileUuid || file.uuid);
           setData((prev) => prev.map((row) => 
             row.id === newRow.id 
               ? { 
@@ -533,13 +525,13 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
     };
 
     const eventHandler = (event: Event) => {
-      handleVaultFileAnalyse(event as CustomEvent<{ file: any; projectId: string }>);
+      handleVaultFileAnalyse(event as CustomEvent<{ file: any; fileUuid?: string; projectId: string }>);
     };
     window.addEventListener('vault-file-analyse', eventHandler);
     return () => {
       window.removeEventListener('vault-file-analyse', eventHandler);
     };
-  }, [downloadFileFromVault, toast, currentProjectId, user, teamId]);
+  }, [toast, processFileWithDocling]);
   
   const defaultColumns = React.useMemo<ColumnDef<Record<string, any>>[]>(
     () => [
@@ -645,6 +637,7 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
       type: file.type,
       url: URL.createObjectURL(file),
       vaultFileId: uploadedVaultFiles[idx]?.id,
+      vaultFileUuid: uploadedVaultFiles[idx]?.uuid,
     }));
 
     // Update the row with uploaded files and set processing status
@@ -656,7 +649,7 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
 
     // Process the files to extract markdown content
     try {
-      const processedContent = await processFileWithDocling(files[0], uploadedFiles[0]?.vaultFileId);
+      const processedContent = await processFileWithDocling(files[0], uploadedFiles[0]?.vaultFileUuid);
       setData((prev) => prev.map((row, idx) => 
         idx === rowIndex 
           ? { 
@@ -718,7 +711,7 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
         const response = await fetch(fileCells[0].url);
         const blob = await response.blob();
         const file = new File([blob], fileCells[0].name, { type: blob.type });
-        const processedContent = await processFileWithDocling(file, fileCells[0].vaultFileId);
+        const processedContent = await processFileWithDocling(file, fileCells[0].vaultFileUuid);
         setData((prev) => prev.map((row, idx) => 
           idx === rowIndex 
             ? { 
@@ -784,10 +777,8 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
     }
   }, []);
 
-  const handleSaveColumn = React.useCallback((colDef: { name: string; type: ColumnType; prompt: string }) => {
-    const promptValue = colDef.prompt || '';
-    const columnId = editingColumnId || colDef.name.toLowerCase().replace(/\s+/g, '-');
-
+  // Helper function to create a column definition from column data
+  const createColumnDef = React.useCallback((colDef: { name: string; type: ColumnType; prompt: string }, columnId: string) => {
     // Map ColumnType to cell variant
     const variantMap: Record<ColumnType, string> = {
       'short-text': 'short-text',
@@ -799,14 +790,11 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
       'file': 'file',
     };
 
-    // Special handling for content column - preserve accessorKey
-    const isContentColumn = editingColumnId === 'content';
-    
-    // Build the column definition - ensure it matches the structure of defaultColumns
+    // Build the column definition
     const newColumn: ColumnDef<RowData> = {
       id: columnId,
       accessorKey: columnId,
-      header: isContentColumn ? 'Content' : colDef.name,
+      header: colDef.name,
       enableHiding: true,
       enableSorting: true,
       enableResizing: true,
@@ -814,8 +802,8 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
         cell: colDef.type === 'file' 
           ? {
               variant: "file" as const,
-              multiple: isContentColumn ? false : true,
-              maxFiles: isContentColumn ? 1 : 10,
+              multiple: true,
+              maxFiles: 10,
               maxFileSize: 10 * 1024 * 1024, // 10MB
             }
           : {
@@ -828,9 +816,36 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
     };
 
     // Only add custom cell renderer for boolean type
-    // For other types, let DataGridCell handle rendering based on meta.cell.variant
     if (colDef.type === 'boolean') {
       newColumn.cell = ({ getValue }: any) => (getValue() ? "✓" : "✗");
+    }
+
+    return newColumn;
+  }, []);
+
+  const handleSaveColumn = React.useCallback((colDef: { name: string; type: ColumnType; prompt: string }) => {
+    const promptValue = colDef.prompt || '';
+    const columnId = editingColumnId || colDef.name.toLowerCase().replace(/\s+/g, '-');
+
+    // Special handling for content column - preserve accessorKey
+    const isContentColumn = editingColumnId === 'content';
+    
+    // Build the column definition - ensure it matches the structure of defaultColumns
+    const newColumn = createColumnDef(colDef, columnId);
+    
+    // Override header for content column
+    if (isContentColumn) {
+      newColumn.header = 'Content';
+      if (colDef.type === 'file') {
+        newColumn.meta = {
+          cell: {
+            variant: "file" as const,
+            multiple: false,
+            maxFiles: 1,
+            maxFileSize: 10 * 1024 * 1024,
+          }
+        };
+      }
     }
 
     if (editingColumnId) {
@@ -849,7 +864,46 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
 
     setAddColumnAnchor(null);
     setEditingColumnId(null);
-  }, [editingColumnId, columns, columnMetadata]);
+  }, [editingColumnId, columns, columnMetadata, createColumnDef]);
+
+  // Handle preset application
+  const handlePresetSelect = React.useCallback((preset: AnalyserPreset) => {
+    // Keep the content column, replace other columns with preset columns
+    const contentColumn = columns.find(col => col.id === 'content');
+    
+    // Create column definitions for preset columns
+    const presetColumns: ColumnDef<RowData>[] = preset.columns.map(col => {
+      const columnId = col.name.toLowerCase().replace(/\s+/g, '-');
+      return createColumnDef(col, columnId);
+    });
+
+    // Combine content column (if exists) with preset columns, ensuring content is first
+    const newColumns = contentColumn 
+      ? [contentColumn, ...presetColumns]
+      : [...defaultColumns as ColumnDef<RowData>[], ...presetColumns];
+
+    setColumns(newColumns);
+
+    // Create metadata for preset columns (preserve content metadata if it exists)
+    const newMetadata: Record<string, { type: ColumnType; prompt: string }> = {
+      ...(columnMetadata.content ? { content: columnMetadata.content } : {}),
+    };
+
+    preset.columns.forEach(col => {
+      const columnId = col.name.toLowerCase().replace(/\s+/g, '-');
+      newMetadata[columnId] = {
+        type: col.type,
+        prompt: col.prompt,
+      };
+    });
+
+    setColumnMetadata(newMetadata);
+
+    toast({
+      title: "Preset Applied",
+      description: `Applied "${preset.name}" preset with ${preset.columns.length} column${preset.columns.length !== 1 ? 's' : ''}.`,
+    });
+  }, [columns, columnMetadata, createColumnDef, defaultColumns, toast]);
 
   // Handle viewing a file from the grid
   const handleViewFile = React.useCallback(({ file, rowIndex, columnId, row }: {
@@ -879,6 +933,11 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
     } as any,
   });
 
+  // Store rowVirtualizer in ref so it can be accessed in event handler
+  React.useEffect(() => {
+    rowVirtualizerRef.current = dataGridProps.rowVirtualizer;
+  }, [dataGridProps.rowVirtualizer]);
+
   const handleDragOver = React.useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -905,6 +964,7 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
     setSelectedCell(null);
     setIsSidebarExpanded(false);
   }, []);
+
     
   return (
     <TabsContent value="analyser" className="mt-4 flex flex-row min-h-[calc(100vh-8rem)] z-10">
@@ -967,6 +1027,7 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
               type: file.type,
               url: URL.createObjectURL(file),
               vaultFileId: uploadedVaultFiles[idx]?.id,
+              vaultFileUuid: uploadedVaultFiles[idx]?.uuid,
             };
 
             return {
@@ -994,7 +1055,7 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
           for (let i = 0; i < files.length; i++) {
             const file = files[i];
             const rowId = initialRows[i].id;
-            const vaultFileId = uploadedVaultFiles[i]?.id;
+            const vaultFileUuid = uploadedVaultFiles[i]?.uuid;
 
             // Update status to processing
             setData((prev) => prev.map((row) => 
@@ -1004,7 +1065,7 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
             ));
 
             try {
-              const processedContent = await processFileWithDocling(file, vaultFileId);
+              const processedContent = await processFileWithDocling(file, vaultFileUuid);
               setData((prev) => prev.map((row) => 
                 row.id === rowId 
                   ? { 
@@ -1079,6 +1140,11 @@ export function AnalyserTabContent({ projectId, teamId }: AnalyserTabContentProp
           />
         </div>
       )}
+
+      {/* Preset Selector - positioned above the grid */}
+      <div className="absolute top-4 right-4 z-20">
+        <PresetSelector onPresetSelect={handlePresetSelect} />
+      </div>
 
       {/* Add/Edit Column Menu */}
       {addColumnAnchor && (
