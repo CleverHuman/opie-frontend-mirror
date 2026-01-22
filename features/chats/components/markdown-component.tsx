@@ -1,8 +1,7 @@
-import { CopyButton } from '@/components/ui/copy-button';
+"use client";
+
 import type { Components } from 'react-markdown';
-import { cn } from '@/lib/utils';
-import { Check, Copy, ExternalLink, FileText, Code2, AlertCircle, Info, Lightbulb } from 'lucide-react';
-import { useState } from 'react';
+import { ExternalLink, FileText } from 'lucide-react';
 import { SyntaxHighlighter } from '@/components/ui/syntax-highlighter';
 
 interface MarkdownProps {
