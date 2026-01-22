@@ -189,7 +189,12 @@ export const FilesTab = React.forwardRef<{
     try {
       let successCount = 0; let errorCount = 0;
       for (const fileId of selectedFiles) {
-        try { await deleteVaultFile(fileId); successCount++; } catch (e) { errorCount++; }
+        const file = filteredFiles.find(f => f.id === fileId);
+        if (file?.uuid) {
+          try { await deleteVaultFile(file.uuid); successCount++; } catch (e) { errorCount++; }
+        } else {
+          errorCount++;
+        }
       }
       if (successCount > 0) toast({ title: "Success", description: `${successCount} file${successCount !== 1 ? 's' : ''} deleted successfully` });
       if (errorCount > 0) toast({ title: "Error", description: `Failed to delete ${errorCount} file${errorCount !== 1 ? 's' : ''}`, variant: "destructive" });
@@ -412,9 +417,9 @@ export const FilesTab = React.forwardRef<{
     }
   };
 
-  const handleFileDelete = useCallback(async (fileId: number) => {
+  const handleFileDelete = useCallback(async (uuid: string) => {
     try { 
-      await deleteVaultFile(fileId); 
+      await deleteVaultFile(uuid); 
       toast({ title: "Success", description: "File deleted successfully" }); 
       refreshFiles(); 
       onTrashTabRefresh?.();

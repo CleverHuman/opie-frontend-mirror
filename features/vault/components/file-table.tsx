@@ -63,7 +63,7 @@ interface FileTableProps {
   onFileDownload: (file: VaultFile) => void;
   onReIngest?: (file: VaultFile) => void;
   onFileRename: (file: VaultFile) => void;
-  onFileDelete: (fileId: number) => void;
+  onFileDelete: (uuid: string) => void;
   onFileAnalyze?: (file: VaultFile) => void;
   onDragStart?: (event: DragEvent, fileId: number) => void;
   onDragEnd?: () => void;
@@ -361,7 +361,7 @@ export function FileTable({
                       )}
                       <DropdownMenuItem
                         className="text-destructive"
-                        onClick={() => onFileDelete(file.id)}
+                        onClick={() => file.uuid && onFileDelete(file.uuid)}
                       >
                         <Trash2 className="mr-2 h-4 w-4" />
                         Delete Permanently
@@ -399,7 +399,7 @@ export function FileTable({
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         className="text-destructive"
-                        onClick={() => onFileDelete(file.id)}
+                        onClick={() => file.uuid && onFileDelete(file.uuid)}
                       >
                         <Trash2 className="mr-2 h-4 w-4" />
                         Delete

@@ -39,7 +39,7 @@ interface FilesTabContentProps {
   onFilePreview: (file: VaultFile) => void;
   onFileDownload: (file: VaultFile) => void;
   onFileRename: (file: VaultFile) => void;
-  onFileDelete: (fileId: number) => void;
+  onFileDelete: (uuid: string) => void;
   onReIngest?: (file: VaultFile) => void;
   onFileAnalyze?: (file: VaultFile) => void;
   onDragStart?: (e: React.DragEvent, fileId: number) => void;

@@ -127,9 +127,9 @@ export async function uploadFiles({
   }
 }
 
-export async function deleteVaultFile(fileId: number): Promise<void> {
+export async function deleteVaultFile(uuid: string): Promise<void> {
   try {
-    await api.delete(`/opie/api/v1/vault-files/${fileId}/`);
+    await api.delete(`/opie/api/v1/vault-files/${uuid}/`);
   } catch (error) {
     const { message } = handleApiError(error);
     throw new Error(message || 'Failed to delete file');

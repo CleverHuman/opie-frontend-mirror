@@ -324,9 +324,9 @@ export function VaultManager() {
     }
   }, [toast]);
 
-  const handleFileDelete = useCallback(async (fileId: number) => {
+  const handleFileDelete = useCallback(async (uuid: string) => {
     try {
-      await deleteVaultFile(fileId);
+      await deleteVaultFile(uuid);
       toast({
         title: "Success",
         description: "File deleted successfully",
@@ -354,11 +354,16 @@ export function VaultManager() {
       
       // Process deletion one by one
       for (const fileId of selectedFiles) {
-        try {
-          await deleteVaultFile(fileId);
-          successCount++;
-        } catch (error) {
-          console.error(`Failed to delete file ID ${fileId}:`, error);
+        const file = filteredFiles.find(f => f.id === fileId);
+        if (file?.uuid) {
+          try {
+            await deleteVaultFile(file.uuid);
+            successCount++;
+          } catch (error) {
+            console.error(`Failed to delete file ID ${fileId}:`, error);
+            errorCount++;
+          }
+        } else {
           errorCount++;
         }
       }
@@ -740,7 +745,7 @@ export function VaultManager() {
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
                                     className="text-destructive"
-                                    onClick={() => handleFileDelete(file.id)}
+                                    onClick={() => file.uuid && handleFileDelete(file.uuid)}
                                   >
                                     <Trash2 className="mr-2 h-4 w-4" />
                                     Delete
