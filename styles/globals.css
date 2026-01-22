@@ -1,12 +1,13 @@
+/* Sidebar styles */
+@import "../components/sidebar/sidebar.css";
+
+/* highlight.js theme */
+/* @import "highlight.js/styles/github-dark.css"; */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* highlight.js theme */
-@import "highlight.js/styles/github-dark.css";
-
-/* Sidebar styles */
-@import "../components/sidebar/sidebar.css";
 
 body {
   font-family: Arial, Helvetica, sans-serif;

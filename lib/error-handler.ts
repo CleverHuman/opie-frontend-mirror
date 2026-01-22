@@ -223,6 +223,7 @@ export class ErrorHandler {
   }
 
   private static getLocalStorageData(): string {
+    if (typeof window === 'undefined') return 'localStorage not available (SSR)';
     try {
       return localStorage.length > 0 ? localStorage.length.toString() : 'localStorage empty';
     } catch (error) {

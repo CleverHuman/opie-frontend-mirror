@@ -20,6 +20,7 @@ import {
   Trash2,
   RotateCcw,
   Zap,
+  RefreshCw,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +44,7 @@ import {
 import { useToast } from "@/components/ui/use-toast";
 import { cn } from "@/lib/utils";
 import { isSafeUrl } from "@/lib/utils/url";
+import { generateVaultArtifacts } from "@/api/vault";
 
 import { VaultFile } from "../types/vault";
 
@@ -63,7 +65,7 @@ interface FileTableProps {
   onFileDownload: (file: VaultFile) => void;
   onReIngest?: (file: VaultFile) => void;
   onFileRename: (file: VaultFile) => void;
-  onFileDelete: (fileId: number) => void;
+  onFileDelete: (uuid: string) => void;
   onFileAnalyze?: (file: VaultFile) => void;
   onDragStart?: (event: DragEvent, fileId: number) => void;
   onDragEnd?: () => void;
@@ -170,10 +172,10 @@ export function FileTable({
 
   const handleCopyLink = useCallback(
     async (file: VaultFile) => {
-      if (!file.file || !isSafeUrl(file.file)) {
+      if (!file.uuid) {
         toast({
           title: "Error",
-          description: "Invalid or unsafe file URL.",
+          description: "File UUID not available.",
           variant: "destructive",
         });
         return;
@@ -184,7 +186,10 @@ export function FileTable({
           throw new Error("Clipboard API unavailable");
         }
 
-        await navigator.clipboard.writeText(file.file);
+        // Fetch signed URL to copy
+        const { getVaultFileDownloadUrl } = await import('@/api/vault');
+        const response = await getVaultFileDownloadUrl(file.uuid, 15, 'inline');
+        await navigator.clipboard.writeText(response.url);
         toast({
           title: "Link copied",
           description: "File link has been copied to your clipboard.",
@@ -193,6 +198,37 @@ export function FileTable({
         toast({
           title: "Error",
           description: "Unable to copy link. Please try again.",
+          variant: "destructive",
+        });
+      }
+    },
+    [toast]
+  );
+
+  const handleGenerateArtifacts = useCallback(
+    async (file: VaultFile) => {
+      if (!file.uuid) {
+        toast({
+          title: "Error",
+          description: "File UUID not available.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      try {
+        const response = await generateVaultArtifacts(file.uuid);
+        
+        toast({
+          title: "Artifact generation started",
+          description: response.status === "processing" 
+            ? "Artifacts are being generated. This may take a few moments."
+            : `File status: ${response.status}`,
+        });
+      } catch (error: any) {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to start artifact generation. Please try again.",
           variant: "destructive",
         });
       }
@@ -358,7 +394,7 @@ export function FileTable({
                       )}
                       <DropdownMenuItem
                         className="text-destructive"
-                        onClick={() => onFileDelete(file.id)}
+                        onClick={() => file.uuid && onFileDelete(file.uuid)}
                       >
                         <Trash2 className="mr-2 h-4 w-4" />
                         Delete Permanently
@@ -374,6 +410,12 @@ export function FileTable({
                         <DropdownMenuItem onClick={() => onFileAnalyze(file)}>
                           <Zap className="mr-2 h-4 w-4" />
                           Analyse
+                        </DropdownMenuItem>
+                      )}
+                      {!file.is_folder && (
+                        <DropdownMenuItem onClick={() => handleGenerateArtifacts(file)}>
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          Generate Artifacts
                         </DropdownMenuItem>
                       )}
                       {onReIngest && (
@@ -396,7 +438,7 @@ export function FileTable({
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         className="text-destructive"
-                        onClick={() => onFileDelete(file.id)}
+                        onClick={() => file.uuid && onFileDelete(file.uuid)}
                       >
                         <Trash2 className="mr-2 h-4 w-4" />
                         Delete
@@ -412,6 +454,7 @@ export function FileTable({
     ],
     [
       handleCopyLink,
+      handleGenerateArtifacts,
       isTrashMode,
       onFileDelete,
       onFileDownload,

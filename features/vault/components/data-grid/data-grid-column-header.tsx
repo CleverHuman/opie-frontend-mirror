@@ -23,7 +23,7 @@ import {
   PenIcon,
   PinIcon,
   PinOffIcon,
-  TextInitialIcon,
+  TypeIcon,
   XIcon,
 } from "lucide-react";
 import * as React from "react";
@@ -53,7 +53,7 @@ function getColumnVariant(variant?: CellOpts["variant"]): {
     case "short-text":
       return { icon: BaselineIcon, label: "Short text" };
     case "long-text":
-      return { icon: TextInitialIcon, label: "Long text" };
+      return { icon: TypeIcon, label: "Long text" };
     case "number":
       return { icon: HashIcon, label: "Number" };
     case "url":

@@ -5,6 +5,7 @@ export interface DocumentFile {
   size: number;
   content: string; // Base64 string for PDF/Images, or raw text for TXT
   mimeType: string;
+  vaultFileUuid?: string; // Optional UUID for vault files to enable PDF preview
 }
 
 export type ColumnType = 'short-text' | 'long-text' | 'number' | 'date' | 'boolean' | 'list' | 'file';
@@ -43,3 +44,24 @@ export interface ChatMessage {
 
 export type ViewMode = 'grid' | 'chat';
 export type SidebarMode = 'none' | 'verify' | 'chat';
+
+// Preset types
+export interface PresetColumn {
+  name: string;
+  type: ColumnType;
+  prompt: string;
+}
+
+export interface AnalyserPreset {
+  id: number;
+  name: string;
+  description?: string;
+  columns: PresetColumn[];
+  is_system: boolean;
+  created_by?: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  // Legacy field for compatibility (maps to is_system)
+  isDefault?: boolean;
+}

@@ -478,6 +478,7 @@ export interface ExpectedOutput {
 
 export interface VaultFile {
   id: number;
+  uuid: string;
   file: string;
   project_uuid: string;
   uploaded_by: number;

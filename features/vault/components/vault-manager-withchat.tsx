@@ -5,13 +5,13 @@ import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getProject } from "@/api/projects";
-import { uploadFiles, getVaultFilesByProject, deleteVaultFile, VaultFilesResponse } from "@/api/vault";
+import { uploadFiles, getVaultFilesByProject, deleteVaultFile, VaultFilesResponse, generateVaultArtifacts } from "@/api/vault";
 import { Project, VaultFile as BaseVaultFile } from "@/types/api";
 import { handleApiError } from "@/lib/utils/handle-api-error";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/contexts/auth-context";
 import { Loader2, Settings, Activity, ArrowLeft, Edit, Settings2 } from "lucide-react";
-import { Plus, FileText, Filter, ChevronDown, Eye, Download, Link, Trash2, MoreHorizontal, UploadCloud } from "lucide-react";
+import { Plus, FileText, Filter, ChevronDown, Eye, Download, Link, Trash2, MoreHorizontal, UploadCloud, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import SearchInput from "@/components/ui/search-input";
 import { formatDistanceToNow } from "date-fns";
@@ -269,40 +269,64 @@ export function VaultManager() {
     setCurrentPage(1);
   }, []);
 
-  const handleFilePreview = useCallback((file: VaultFile) => {
-    // Open file in new tab for preview
-    if (file.file && isSafeUrl(file.file)) {
-      window.open(file.file, '_blank');
-    } else {
+  const handleFilePreview = useCallback(async (file: VaultFile) => {
+    if (!file.uuid) {
       toast({
         title: "Error",
-        description: "Invalid or unsafe file URL.",
+        description: "File UUID not available.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const { getVaultFileDownloadUrl } = await import('@/api/vault');
+      // Fetch signed URL for viewing (15 min expiry, inline disposition)
+      const response = await getVaultFileDownloadUrl(file.uuid, 15, 'inline');
+      window.open(response.url, '_blank');
+    } catch (error) {
+      console.error('Failed to preview file:', error);
+      toast({
+        title: "Error",
+        description: "Failed to preview file. Please try again.",
         variant: "destructive",
       });
     }
   }, [toast]);
 
-  const handleFileDownload = useCallback((file: VaultFile) => {
-    // Direct download through URL
-    if (file.file && isSafeUrl(file.file)) {
+  const handleFileDownload = useCallback(async (file: VaultFile) => {
+    if (!file.uuid) {
+      toast({
+        title: "Error",
+        description: "File UUID not available.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const { getVaultFileDownloadUrl } = await import('@/api/vault');
+      // Fetch signed URL for download (30 min expiry, attachment disposition)
+      const response = await getVaultFileDownloadUrl(file.uuid, 30, 'attachment');
       const a = document.createElement('a');
-      a.href = file.file;
-      a.download = file.original_filename || 'download';
+      a.href = response.url;
+      a.download = file.original_filename || response.filename || 'download';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-    } else {
+    } catch (error) {
+      console.error('Failed to download file:', error);
       toast({
         title: "Error",
-        description: "Invalid or unsafe file URL.",
+        description: "Failed to download file. Please try again.",
         variant: "destructive",
       });
     }
   }, [toast]);
 
-  const handleFileDelete = useCallback(async (fileId: number) => {
+  const handleFileDelete = useCallback(async (uuid: string) => {
     try {
-      await deleteVaultFile(fileId);
+      await deleteVaultFile(uuid);
       toast({
         title: "Success",
         description: "File deleted successfully",
@@ -319,6 +343,37 @@ export function VaultManager() {
       });
     }
   }, [toast]);
+
+  const handleGenerateArtifacts = useCallback(
+    async (file: VaultFile) => {
+      if (!file.uuid) {
+        toast({
+          title: "Error",
+          description: "File UUID not available.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      try {
+        const response = await generateVaultArtifacts(file.uuid);
+        
+        toast({
+          title: "Artifact generation started",
+          description: response.status === "processing" 
+            ? "Artifacts are being generated. This may take a few moments."
+            : `File status: ${response.status}`,
+        });
+      } catch (error: any) {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to start artifact generation. Please try again.",
+          variant: "destructive",
+        });
+      }
+    },
+    [toast]
+  );
   
   const handleBulkDelete = useCallback(async () => {
     if (selectedFiles.length === 0) return;
@@ -330,11 +385,16 @@ export function VaultManager() {
       
       // Process deletion one by one
       for (const fileId of selectedFiles) {
-        try {
-          await deleteVaultFile(fileId);
-          successCount++;
-        } catch (error) {
-          console.error(`Failed to delete file ID ${fileId}:`, error);
+        const file = filteredFiles.find(f => f.id === fileId);
+        if (file?.uuid) {
+          try {
+            await deleteVaultFile(file.uuid);
+            successCount++;
+          } catch (error) {
+            console.error(`Failed to delete file ID ${fileId}:`, error);
+            errorCount++;
+          }
+        } else {
           errorCount++;
         }
       }
@@ -706,6 +766,12 @@ export function VaultManager() {
                                     <Eye className="mr-2 h-4 w-4" />
                                     Preview
                                   </DropdownMenuItem>
+                                  {!file.is_folder && (
+                                    <DropdownMenuItem onClick={() => handleGenerateArtifacts(file)}>
+                                      <RefreshCw className="mr-2 h-4 w-4" />
+                                      Generate Artifacts
+                                    </DropdownMenuItem>
+                                  )}
                                   <DropdownMenuItem onClick={() => handleFileDownload(file)}>
                                     <Download className="mr-2 h-4 w-4" />
                                     Download
@@ -716,7 +782,7 @@ export function VaultManager() {
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
                                     className="text-destructive"
-                                    onClick={() => handleFileDelete(file.id)}
+                                    onClick={() => file.uuid && handleFileDelete(file.uuid)}
                                   >
                                     <Trash2 className="mr-2 h-4 w-4" />
                                     Delete

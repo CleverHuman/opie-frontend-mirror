@@ -21,6 +21,7 @@ interface ConfigResponse {
 const LOCAL_STORAGE_KEY = 'docs_config';
 
 function getCachedTranslation() {
+  if (typeof window === 'undefined') return undefined;
   try {
     const jsonString = localStorage.getItem(LOCAL_STORAGE_KEY);
     return jsonString ? (JSON.parse(jsonString) as ConfigResponse) : undefined;
@@ -30,6 +31,7 @@ function getCachedTranslation() {
 }
 
 function setCachedTranslation(translations: ConfigResponse) {
+  if (typeof window === 'undefined') return;
   localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(translations));
 }
 

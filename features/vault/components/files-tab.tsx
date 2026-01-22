@@ -189,7 +189,12 @@ export const FilesTab = React.forwardRef<{
     try {
       let successCount = 0; let errorCount = 0;
       for (const fileId of selectedFiles) {
-        try { await deleteVaultFile(fileId); successCount++; } catch (e) { errorCount++; }
+        const file = filteredFiles.find(f => f.id === fileId);
+        if (file?.uuid) {
+          try { await deleteVaultFile(file.uuid); successCount++; } catch (e) { errorCount++; }
+        } else {
+          errorCount++;
+        }
       }
       if (successCount > 0) toast({ title: "Success", description: `${successCount} file${successCount !== 1 ? 's' : ''} deleted successfully` });
       if (errorCount > 0) toast({ title: "Error", description: `Failed to delete ${errorCount} file${errorCount !== 1 ? 's' : ''}`, variant: "destructive" });
@@ -380,24 +385,41 @@ export const FilesTab = React.forwardRef<{
     refreshFiles();
   }, []);
 
-  const handleFileDownload = (file: VaultFile) => {
-    if (file.file && isSafeUrl(file.file)) {
-      const a = document.createElement('a'); a.href = file.file; a.download = file.original_filename || 'download'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    } else { toast({ title: "Error", description: "Invalid or unsafe file URL.", variant: "destructive" }); }
-  };
+  const handleFileDownload = async (file: VaultFile) => {
+    if (!file.uuid) {
+      toast({ title: "Error", description: "File UUID not available.", variant: "destructive" });
+      return;
+    }
 
-  const handleFilePreview = (file: VaultFile) => {
-    if (file.file && isSafeUrl(file.file)) {
-      setPreviewFile(file);
-      setIsPreviewOpen(true);
-    } else {
-      toast({ title: "Error", description: "Invalid or unsafe file URL.", variant: "destructive" });
+    try {
+      const { getVaultFileDownloadUrl } = await import('@/api/vault');
+      // Fetch signed URL for download (30 min expiry, attachment disposition)
+      const response = await getVaultFileDownloadUrl(file.uuid, 30, 'attachment');
+      const a = document.createElement('a');
+      a.href = response.url;
+      a.download = file.original_filename || response.filename || 'download';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Failed to download file:', error);
+      toast({ title: "Error", description: "Failed to download file. Please try again.", variant: "destructive" });
     }
   };
 
-  const handleFileDelete = useCallback(async (fileId: number) => {
+  const handleFilePreview = (file: VaultFile) => {
+    // FilePreviewDialog will fetch the signed URL internally, so we just need to check UUID exists
+    if (file.uuid) {
+      setPreviewFile(file);
+      setIsPreviewOpen(true);
+    } else {
+      toast({ title: "Error", description: "File UUID not available.", variant: "destructive" });
+    }
+  };
+
+  const handleFileDelete = useCallback(async (uuid: string) => {
     try { 
-      await deleteVaultFile(fileId); 
+      await deleteVaultFile(uuid); 
       toast({ title: "Success", description: "File deleted successfully" }); 
       refreshFiles(); 
       onTrashTabRefresh?.();
@@ -431,7 +453,13 @@ export const FilesTab = React.forwardRef<{
     // This will be handled by the parent component (vault-manager) via a callback
     // For now, we'll emit a custom event that the parent can listen to
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('vault-file-analyse', { detail: { file, projectId } }));
+      window.dispatchEvent(new CustomEvent('vault-file-analyse', { 
+        detail: { 
+          file, 
+          fileUuid: file.uuid,
+          projectId 
+        } 
+      }));
     }
   }, [projectId]);
 
@@ -455,7 +483,13 @@ export const FilesTab = React.forwardRef<{
     // Send each file to analyser
     for (const file of filesToAnalyse) {
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('vault-file-analyse', { detail: { file, projectId } }));
+        window.dispatchEvent(new CustomEvent('vault-file-analyse', { 
+          detail: { 
+            file, 
+            fileUuid: file.uuid,
+            projectId 
+          } 
+        }));
       }
     }
 

@@ -115,7 +115,24 @@ export function DataGrid<TData>({
         aria-colcount={columns.length}
         data-slot="grid"
         tabIndex={0}
-        ref={dataGridRef}
+        ref={(node) => {
+          // Handle ref assignment
+          if (typeof dataGridRef === 'function') {
+            dataGridRef(node);
+          } else if (dataGridRef) {
+            (dataGridRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+          }
+          
+          // When element becomes available, ensure virtualizer measures
+          if (node && rowVirtualizer) {
+            // Use a small delay to ensure element is fully mounted
+            requestAnimationFrame(() => {
+              if (node.offsetParent !== null) {
+                rowVirtualizer.measure();
+              }
+            });
+          }
+        }}
         className="relative grid select-none overflow-auto rounded-md border focus:outline-none"
         style={{
           ...columnSizeVars,

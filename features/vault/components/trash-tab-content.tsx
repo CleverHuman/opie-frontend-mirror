@@ -30,7 +30,7 @@ interface TrashTabContentProps {
   onFilePreview: (file: VaultFile) => void;
   onFileDownload: (file: VaultFile) => void;
   onFileRename: (file: VaultFile) => void;
-  onFileDelete: (fileId: number) => void;
+  onFileDelete: (uuid: string) => void;
   onFileRestore?: (fileId: number) => void;
   onDragStart?: (e: React.DragEvent, fileId: number) => void;
   onDragEnd?: () => void;
